@@ -8,20 +8,21 @@ import (
 	"syscall"
 
 	"github.com/4925k/usdl/chat/foundation/logger"
+	"github.com/4925k/usdl/chat/foundation/web"
 )
 
 func main() {
 	var log *logger.Logger
 
+	ctx := context.Background()
+
 	tradeIDFn := func(ctx context.Context) string {
-		return "" // TODO
+		return web.GetTraceID(ctx).String()
 	}
 
 	log = logger.New(os.Stdout, logger.LevelInfo, "CAP", tradeIDFn)
 
 	// -------------------------------------------------------------------------
-
-	ctx := context.Background()
 
 	if err := run(ctx, log); err != nil {
 		log.Error(ctx, "startup", "err", err)

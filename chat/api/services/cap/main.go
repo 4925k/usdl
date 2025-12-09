@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/4925k/usdl/chat/app/sdk/mux"
 	"github.com/4925k/usdl/chat/foundation/logger"
 	"github.com/4925k/usdl/chat/foundation/web"
 )
@@ -38,7 +39,15 @@ func run(ctx context.Context, log *logger.Logger) error {
 	log.Info(ctx, "startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 
 	// -------------------------------------------------------------------------
-	// Startup
+	// SERVERS
+
+	cfgMux := mux.Config{
+		Log: log,
+	}
+
+	muxServer := mux.WebAPI(cfgMux)
+
+	// -------------------------------------------------------------------------
 
 	log.Info(ctx, "startup", "status", "complete")
 	defer log.Info(ctx, "shutdown", "status", "complete")

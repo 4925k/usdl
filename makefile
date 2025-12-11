@@ -20,3 +20,6 @@ deps-upgrade:
 
 run-cap:
 	go run chat/api/services/cap/main.go | go run chat/api/tooling/logfmt/main.go
+
+chat-test:
+	curl -i -X GET http://0.0.0.0:3000/test

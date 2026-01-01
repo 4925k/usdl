@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/4925k/usdl/chat/app/domain/chatapp"
+	"github.com/4925k/usdl/chat/app/sdk/mid"
 	"github.com/4925k/usdl/chat/foundation/logger"
 	"github.com/4925k/usdl/chat/foundation/web"
 )
@@ -20,6 +21,9 @@ func WebAPI(cfg Config) http.Handler {
 
 	app := web.NewApp(
 		logger,
+		mid.Logger(cfg.Log),
+		mid.Errors(cfg.Log),
+		mid.Panics(),
 	)
 
 	chatapp.Routes(app)

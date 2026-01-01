@@ -94,6 +94,9 @@ func run(ctx context.Context, log *logger.Logger) error {
 	log.Info(ctx, "startup", "status", "complete")
 	defer log.Info(ctx, "shutdown", "status", "complete")
 
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+
 	cfgMux := mux.Config{
 		Log: log,
 	}
@@ -117,9 +120,25 @@ func run(ctx context.Context, log *logger.Logger) error {
 		serverErrors <- api.ListenAndServe()
 	}()
 
-	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
-	<-shutdown
+	// -------------------------------------------------------------------------
+	// SHUTDOWN
+
+	select {
+	case err := <-serverErrors:
+		return fmt.Errorf("server error: %w", err)
+
+	case sig := <-shutdown:
+		log.Info(ctx, "shutdown", "status", "started", "signal", sig.String())
+		defer log.Info(ctx, "shutdown", "status", "complete")
+
+		ctx, cancel := context.WithTimeout(ctx, cfg.Web.ShutdownTimeout)
+		defer cancel()
+
+		if err := api.Shutdown(ctx); err != nil {
+			api.Close()
+			return fmt.Errorf("could not stop server gracefully: %w", err)
+		}
+	}
 
 	return nil
 }

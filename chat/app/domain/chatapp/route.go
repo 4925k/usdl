@@ -10,4 +10,6 @@ func Routes(app *web.App) {
 	api := newApp()
 
 	app.HandlerFunc(http.MethodGet, "", "/test", api.test)
+	app.HandlerFunc(http.MethodGet, "", "/connect", api.connect)
+
 }

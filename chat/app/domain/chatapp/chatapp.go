@@ -43,7 +43,7 @@ func (a *app) connect(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Newf(errs.FailedPrecondition, "handshake failed: %s", err)
 	}
 
-	a.log.Info(ctx, "user connected: %s", usr.Name)
+	a.log.Info(ctx, "handshake completed", "user", usr.Name)
 
 	return web.NewNoResponse()
 }

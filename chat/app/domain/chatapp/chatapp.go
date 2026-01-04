@@ -38,12 +38,12 @@ func (a *app) connect(ctx context.Context, r *http.Request) web.Encoder {
 
 	defer c.Close()
 
-	usr, err := a.chat.Handshake(ctx, c)
+	err = a.chat.Handshake(ctx, c)
 	if err != nil {
 		return errs.Newf(errs.FailedPrecondition, "handshake failed: %s", err)
 	}
 
-	a.log.Info(ctx, "handshake completed", "user", usr.Name)
+	a.chat.Listen(ctx, c)
 
 	return web.NewNoResponse()
 }

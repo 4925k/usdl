@@ -16,14 +16,14 @@ type user struct {
 	Name string    `json:"name"`
 }
 
-type message struct {
+type outMessage struct {
 	From    user   `json:"from"`
 	To      user   `json:"to"`
 	Message string `json:"message"`
 }
 
-type Message struct {
-	FromID  uuid.UUID `json:"from_id"`
-	ToID    uuid.UUID `json:"to_id"`
+type inMessage struct {
+	FromID  uuid.UUID `json:"fromID"`
+	ToID    uuid.UUID `json:"toID"`
 	Message string    `json:"message"`
 }

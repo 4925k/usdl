@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -16,6 +18,9 @@ func main() {
 }
 
 func connect() error {
+	user1 := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	// user2 := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
 	// Connect to the WebSocket server
 
 	url := "ws://localhost:3000/connect"
@@ -46,7 +51,7 @@ func connect() error {
 		ID   uuid.UUID
 		Name string
 	}{
-		ID:   uuid.New(),
+		ID:   user1,
 		Name: "muffin",
 	}
 
@@ -69,5 +74,68 @@ func connect() error {
 
 	fmt.Println("Received message from server:", string(msg))
 
-	return nil
+	// ------------------------------------------------------------
+	// go routine to print messages from server
+
+	go func() {
+		_, msg, err := socket.ReadMessage()
+		if err != nil {
+			fmt.Println("Error reading message:", err)
+			return
+		}
+
+		var outMsg outMessage
+		if err := json.Unmarshal(msg, &outMsg); err != nil {
+			fmt.Println("Error unmarshaling message:", err)
+			return
+		}
+
+		fmt.Printf("Message from %s: %s\n", outMsg.From.Name, outMsg.Message)
+	}()
+
+	// ------------------------------------------------------------
+	// send a chat message to another user
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Enter message: ")
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+
+	inMsg := inMessage{
+		FromID:  user1,
+		ToID:    user1,
+		Message: input,
+	}
+
+	data, err = json.Marshal(inMsg)
+	if err != nil {
+		return fmt.Errorf("marshal error: %w", err)
+	}
+
+	if err := socket.WriteMessage(websocket.TextMessage, data); err != nil {
+		return err
+	}
+
+	// ------------------------------------------------------------
+	// keep the main function running
+	select {}
+}
+
+type inMessage struct {
+	FromID  uuid.UUID `json:"fromID"`
+	ToID    uuid.UUID `json:"toID"`
+	Message string    `json:"message"`
+}
+
+type user struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+type outMessage struct {
+	From    user   `json:"from"`
+	To      user   `json:"to"`
+	Message string `json:"message"`
 }

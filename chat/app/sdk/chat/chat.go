@@ -27,7 +27,8 @@ type Chat struct {
 // NewChat creates a new chat manager.
 func NewChat(log *logger.Logger) *Chat {
 	c := &Chat{
-		log: log,
+		log:   log,
+		users: make(map[uuid.UUID]connection),
 	}
 
 	c.ping()
@@ -86,6 +87,8 @@ func (c *Chat) Listen(ctx context.Context, conn *websocket.Conn) {
 			c.log.Error(ctx, "unmarshal message failed", "error", err)
 			return
 		}
+
+		fmt.Println("Received message:", inMsg)
 
 		if err := c.sendMessage(inMsg); err != nil {
 			c.log.Error(ctx, "send message failed", "error", err)

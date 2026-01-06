@@ -88,8 +88,6 @@ func (c *Chat) Listen(ctx context.Context, conn *websocket.Conn) {
 			return
 		}
 
-		fmt.Println("Received message:", inMsg)
-
 		if err := c.sendMessage(inMsg); err != nil {
 			c.log.Error(ctx, "send message failed", "error", err)
 			continue

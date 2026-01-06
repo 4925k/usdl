@@ -18,8 +18,14 @@ func main() {
 }
 
 func connect() error {
+	userName := "muffin"
 	user1 := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	// user2 := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	user2 := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
+	if os.Args[1] == "1" {
+		user1, user2 = user2, user1
+		userName = "cookie"
+	}
 
 	// Connect to the WebSocket server
 
@@ -52,7 +58,7 @@ func connect() error {
 		Name string
 	}{
 		ID:   user1,
-		Name: "muffin",
+		Name: userName,
 	}
 
 	data, err := json.Marshal(user)
@@ -105,7 +111,7 @@ func connect() error {
 
 	inMsg := inMessage{
 		FromID:  user1,
-		ToID:    user1,
+		ToID:    user2,
 		Message: input,
 	}
 

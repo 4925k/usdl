@@ -25,4 +25,7 @@ chat-test:
 	curl -i -X GET http://0.0.0.0:3000/test
 
 chat-connect:
-	go run chat/api/tooling/client/main.go
+	go run chat/api/tooling/client/main.go 0
+
+chat-connect-1:
+	go run chat/api/tooling/client/main.go 1

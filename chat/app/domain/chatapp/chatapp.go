@@ -8,12 +8,10 @@ import (
 	"github.com/4925k/usdl/chat/app/sdk/errs"
 	"github.com/4925k/usdl/chat/foundation/logger"
 	"github.com/4925k/usdl/chat/foundation/web"
-	"github.com/gorilla/websocket"
 )
 
 type app struct {
 	log  *logger.Logger
-	WS   websocket.Upgrader
 	chat *chat.Chat
 }
 
@@ -31,19 +29,13 @@ func (a *app) test(_ context.Context, _ *http.Request) web.Encoder {
 }
 
 func (a *app) connect(ctx context.Context, r *http.Request) web.Encoder {
-	c, err := a.WS.Upgrade(web.GetWriter(ctx), r, nil)
-	if err != nil {
-		return errs.Newf(errs.FailedPrecondition, "unable to upgrade to websocket: %s", err)
-	}
-
-	defer c.Close()
-
-	err = a.chat.Handshake(ctx, c)
+	usr, err := a.chat.Handshake(ctx, web.GetWriter(ctx), r)
 	if err != nil {
 		return errs.Newf(errs.FailedPrecondition, "handshake failed: %s", err)
 	}
+	defer usr.Conn.Close()
 
-	a.chat.Listen(ctx, c)
+	a.chat.Listen(ctx, usr)
 
 	return web.NewNoResponse()
 }

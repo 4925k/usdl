@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
+	"net/http"
 	"sync"
 	"time"
 
+	"github.com/4925k/usdl/chat/app/sdk/errs"
 	"github.com/4925k/usdl/chat/foundation/logger"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -20,7 +21,7 @@ var ErrToNotExists = fmt.Errorf("to user does not exist")
 // Chat manages chat operations.
 type Chat struct {
 	log   *logger.Logger
-	users map[uuid.UUID]connection
+	users map[uuid.UUID]User
 	mu    sync.RWMutex
 }
 
@@ -28,7 +29,7 @@ type Chat struct {
 func NewChat(log *logger.Logger) *Chat {
 	c := &Chat{
 		log:   log,
-		users: make(map[uuid.UUID]connection),
+		users: make(map[uuid.UUID]User),
 	}
 
 	c.ping()
@@ -37,10 +38,16 @@ func NewChat(log *logger.Logger) *Chat {
 }
 
 // Handshake performs the handshake process for a new connection.
-func (c *Chat) Handshake(ctx context.Context, conn *websocket.Conn) error {
-	err := conn.WriteMessage(websocket.TextMessage, []byte("HELLO"))
+func (c *Chat) Handshake(ctx context.Context, w http.ResponseWriter, r *http.Request) (User, error) {
+	var ws websocket.Upgrader
+	conn, err := ws.Upgrade(w, r, nil)
 	if err != nil {
-		return err
+		return User{}, errs.Newf(errs.FailedPrecondition, "unable to upgrade to websocket: %s", err)
+	}
+
+	err = conn.WriteMessage(websocket.TextMessage, []byte("HELLO"))
+	if err != nil {
+		return User{}, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
@@ -48,35 +55,38 @@ func (c *Chat) Handshake(ctx context.Context, conn *websocket.Conn) error {
 
 	msg, err := c.readMessage(ctx, conn)
 	if err != nil {
-		return fmt.Errorf("read message: %w", err)
-	}
-	var usr user
-	if err := json.Unmarshal(msg, &usr); err != nil {
-		return fmt.Errorf("unmarshal message: %w", err)
+		return User{}, fmt.Errorf("read message: %w", err)
 	}
 
-	if err := c.addUser(usr, conn); err != nil {
+	usr := User{
+		Conn: conn,
+	}
+	if err := json.Unmarshal(msg, &usr); err != nil {
+		return User{}, fmt.Errorf("unmarshal message: %w", err)
+	}
+
+	if err := c.addUser(ctx, usr); err != nil {
 		defer conn.Close()
 		if err := conn.WriteMessage(websocket.TextMessage, []byte("already connected")); err != nil {
-			return fmt.Errorf("write message: %w", err)
+			return User{}, fmt.Errorf("write message: %w", err)
 		}
 
-		return fmt.Errorf("add user: %w", err)
+		return User{}, fmt.Errorf("add user: %w", err)
 	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("WELCOME "+usr.Name)); err != nil {
-		return err
+		return User{}, err
 	}
 
 	c.log.Info(ctx, "handshake complete", "user", usr)
 
-	return nil
+	return usr, nil
 }
 
 // Listen starts listening for messages from the connected user.
-func (c *Chat) Listen(ctx context.Context, conn *websocket.Conn) {
+func (c *Chat) Listen(ctx context.Context, usr User) {
 	for {
-		msg, err := c.readMessage(ctx, conn)
+		msg, err := c.readMessage(ctx, usr.Conn)
 		if err != nil {
 			c.log.Error(ctx, "read message failed", "error", err)
 			return
@@ -88,121 +98,14 @@ func (c *Chat) Listen(ctx context.Context, conn *websocket.Conn) {
 			return
 		}
 
-		if err := c.sendMessage(inMsg); err != nil {
+		if err := c.sendMessage(ctx, inMsg); err != nil {
 			c.log.Error(ctx, "send message failed", "error", err)
 			continue
 		}
 	}
-
 }
 
 // ----------------------------------------------------------------------------------
-
-// sendMessage sends a message from one user to another.
-func (c *Chat) sendMessage(msg inMessage) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	from, ok := c.users[msg.FromID]
-	if !ok {
-		return ErrFromNotExists
-	}
-
-	to, ok := c.users[msg.ToID]
-	if !ok {
-		return ErrToNotExists
-	}
-
-	m := outMessage{
-		From: user{
-			ID:   from.id,
-			Name: from.name,
-		},
-		To: user{
-			ID:   to.id,
-			Name: to.name,
-		},
-		Message: msg.Message,
-	}
-
-	if err := to.conn.WriteJSON(m); err != nil {
-		return fmt.Errorf("write json: %w", err)
-	}
-
-	return nil
-}
-
-// connections returns a copy of all current connections.
-func (c *Chat) connections() map[uuid.UUID]connection {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	conns := make(map[uuid.UUID]connection, len(c.users))
-	maps.Copy(conns, c.users)
-
-	return conns
-}
-
-// ping sends periodic ping messages to all connected users.
-func (c *Chat) ping() {
-	ticket := time.NewTicker(time.Second * 10)
-
-	go func() {
-		for {
-			<-ticket.C
-
-			c.log.Info(context.Background(), "PING", "status", "started")
-
-			conns := c.connections() // copy connections to avoid read locking during ping
-			for _, conn := range conns {
-				c.log.Info(context.Background(), "PING", "user", conn.name, "id", conn.id)
-				if err := conn.conn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
-					c.removeUser(conn.id) // remove user on ping failure only so that there's a single source of truth
-				}
-			}
-
-			c.log.Info(context.Background(), "PING", "status", "completed")
-		}
-	}()
-}
-
-// addUser adds a user and their connection to the chat.
-// Returns an error if the user already exists.
-func (c *Chat) addUser(usr user, conn *websocket.Conn) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if _, ok := c.users[usr.ID]; ok {
-		return fmt.Errorf("user already exists")
-	}
-
-	c.users[usr.ID] = connection{
-		conn: conn,
-		id:   usr.ID,
-		name: usr.Name,
-	}
-
-	c.log.Info(context.Background(), "added user", "user", usr.Name, "id", usr.ID)
-
-	return nil
-}
-
-// removeUser removes a user from the chat.
-func (c *Chat) removeUser(userID uuid.UUID) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	connection, ok := c.users[userID]
-	if !ok {
-		c.log.Info(context.Background(), "remove user: user does not exist", "id", userID)
-		return
-	}
-
-	c.log.Info(context.Background(), "removing user", "user", connection.name, "id", connection.id)
-
-	delete(c.users, userID)
-	connection.conn.Close()
-}
 
 // readMessage reads a message from the websocket connection with context cancellation support.
 func (c *Chat) readMessage(ctx context.Context, conn *websocket.Conn) ([]byte, error) {
@@ -229,10 +132,117 @@ func (c *Chat) readMessage(ctx context.Context, conn *websocket.Conn) ([]byte, e
 		conn.Close()
 		return nil, ctx.Err()
 	case resp = <-ch:
-		if resp.msg == nil {
-			return nil, fmt.Errorf("empty message")
+		if resp.err != nil {
+			return nil, resp.err
 		}
 	}
 
 	return resp.msg, nil
+}
+
+// sendMessage sends a message from one user to another.
+func (c *Chat) sendMessage(ctx context.Context, msg inMessage) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	from, ok := c.users[msg.FromID]
+	if !ok {
+		return ErrFromNotExists
+	}
+
+	to, ok := c.users[msg.ToID]
+	if !ok {
+		return ErrToNotExists
+	}
+
+	m := outMessage{
+		From: User{
+			ID:   from.ID,
+			Name: from.Name,
+		},
+		To: User{
+			ID:   to.ID,
+			Name: to.Name,
+		},
+		Message: msg.Message,
+	}
+
+	if err := to.Conn.WriteJSON(m); err != nil {
+		c.removeUser(ctx, to.ID)
+		return fmt.Errorf("write json: %w", err)
+	}
+
+	return nil
+}
+
+// connections returns a copy of all current connections.
+func (c *Chat) connections() map[uuid.UUID]*websocket.Conn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	conns := make(map[uuid.UUID]*websocket.Conn, len(c.users))
+	for id, usr := range c.users {
+		conns[id] = usr.Conn
+	}
+
+	return conns
+}
+
+// ping sends periodic ping messages to all connected users.
+func (c *Chat) ping() {
+	ticket := time.NewTicker(time.Second * 10)
+
+	go func() {
+		for {
+			ctx := context.Background()
+			<-ticket.C
+
+			conns := c.connections() // copy connections to avoid read locking during ping
+			for k, conn := range conns {
+				c.log.Info(ctx, "ping", "id", "k")
+				if err := conn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
+					c.removeUser(context.Background(), k) // remove user on ping failure only so that there's a single source of truth
+				}
+			}
+
+		}
+	}()
+}
+
+// addUser adds a user and their connection to the chat.
+// Returns an error if the user already exists.
+func (c *Chat) addUser(ctx context.Context, usr User) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.users[usr.ID]; ok {
+		return fmt.Errorf("user already exists")
+	}
+
+	c.users[usr.ID] = User{
+		Conn: usr.Conn,
+		ID:   usr.ID,
+		Name: usr.Name,
+	}
+
+	c.log.Info(ctx, "added user", "user", usr.Name, "id", usr.ID)
+
+	return nil
+}
+
+// removeUser removes a user from the chat.
+func (c *Chat) removeUser(ctx context.Context, userID uuid.UUID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	usr, ok := c.users[userID]
+	if !ok {
+		c.log.Info(ctx, "remove user: user does not exist", "id", userID)
+		return
+	}
+
+	c.log.Info(ctx, "removing user", "user", usr.Name, "id", usr.ID)
+
+	delete(c.users, userID)
+	usr.Conn.Close()
 }
